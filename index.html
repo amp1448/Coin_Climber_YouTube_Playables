@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Coin Climber — Arcade Game</title>
+<style>
+*{box-sizing:border-box} html,body{margin:0;height:100%;background:#080d25;color:white;font-family:system-ui,-apple-system,Segoe UI,sans-serif;overflow:hidden;touch-action:none}body{display:flex;align-items:center;justify-content:center}
+#wrap{position:relative;width:min(100vw,460px,calc(100dvh * .62));height:min(100dvh,780px);max-height:100dvh;background:#101a44;overflow:hidden;box-shadow:0 0 80px #000a}canvas{width:100%;height:100%;display:block;touch-action:none}
+#hud{position:absolute;top:max(12px,env(safe-area-inset-top));left:12px;right:12px;display:flex;justify-content:space-between;gap:7px;pointer-events:none} .chip{background:#07132bbb;border:1px solid #ffffff2c;border-radius:13px;padding:7px 10px;font-weight:850;line-height:1.1;backdrop-filter:blur(8px)}.chip small{display:block;font-size:10px;opacity:.66;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}.chip b{font-size:21px}.gold{color:#ffe17a}.overlay{position:absolute;inset:0;display:flex;justify-content:center;align-items:center;flex-direction:column;background:linear-gradient(180deg,#070f26b3,#08132bee 66%);padding:22px;text-align:center} .overlay.hidden{display:none}h1{font-size:clamp(37px,8vw,54px);line-height:1;margin:3px 0 10px;letter-spacing:-2px;text-shadow:0 4px #bd602d,0 8px #472a44}.emblem{font-size:68px;filter:drop-shadow(0 10px 12px #0006);margin-bottom:9px}.desc{font-size:15px;line-height:1.5;max-width:320px;color:#d9e7ff;margin:10px 0 16px}.how{font-size:13px;max-width:320px;opacity:.72;margin:16px 0 4px;line-height:1.5}.cta{cursor:pointer;border:0;background:linear-gradient(#ffdd69,#ff9f3f);box-shadow:0 6px 0 #a34c27,0 13px 25px #0006;color:#332038;font-weight:1000;font-size:20px;padding:13px 45px;border-radius:18px;margin:12px 0;touch-action:manipulation}.cta:active{transform:translateY(5px);box-shadow:0 1px 0 #a34c27}.secondary{font-size:12px;color:#bcd2f7;opacity:.8}.stat-row{display:flex;gap:16px;margin:6px 0 12px}.stat{background:#ffffff14;border:1px solid #ffffff2b;border-radius:16px;padding:10px 16px;min-width:95px}.stat strong{display:block;font-size:25px;color:#ffe17a}.stat span{font-size:11px;opacity:.7}#pause{position:absolute;right:12px;top:85px;border:1px solid #ffffff55;background:#051332b9;border-radius:11px;color:#fff;font-size:21px;padding:8px 11px;cursor:pointer;display:none;touch-action:manipulation}#pause.show{display:block}#toast{position:absolute;top:145px;left:0;right:0;text-align:center;font-size:22px;font-weight:950;color:#ffe66c;text-shadow:0 2px 8px #000;pointer-events:none;opacity:0;transition:opacity .2s}#hint{position:absolute;bottom:19px;left:0;right:0;text-align:center;color:#ffffff9c;font-size:12px;pointer-events:none}
+@media(max-height:620px){.emblem{font-size:44px}h1{font-size:35px}.desc{margin:5px 0}.how{margin:6px 0}.cta{margin:8px 0}} 
+</style></head>
+<body><div id="wrap">
+<canvas id="game" width="420" height="700" aria-label="Arcade game: collect coins and dodge obstacles"></canvas>
+<div id="hud"><div class="chip"><small>Coins</small><b class="gold" id="coins">🪙 0</b></div><div class="chip"><small>Distance</small><b id="distance">0 m</b></div><div class="chip"><small>Best</small><b id="best">0</b></div></div>
+<button id="pause" title="Pause game" aria-label="Pause game">Ⅱ</button><div id="toast"></div><div id="hint">DRAG TO STEER • ↑ KEEP CLIMBING</div>
+<div id="startScreen" class="overlay"><div class="emblem">🚀🪙</div><h1>COIN<br>CLIMBER</h1><p class="desc">Race up a glowing arcade track, grab golden coins, and dodge the red hazards!</p><button class="cta" id="start">▶ PLAY NOW</button><p class="how">📱 Drag your finger left or right<br>⌨️ Arrow keys or A / D to steer<br>🟨 Collect coins • 🟥 Avoid blocks</p><div class="secondary">Endless upward adventure • high-score challenge</div></div>
+<div id="overScreen" class="overlay hidden"><div class="emblem">💥</div><h1>GAME OVER</h1><p class="desc" id="endText">Nice climb!</p><div class="stat-row"><div class="stat"><strong id="endCoins">0</strong><span>COINS</span></div><div class="stat"><strong id="endMeters">0</strong><span>METERS</span></div></div><button class="cta" id="again">↻ PLAY AGAIN</button><div class="secondary" id="endBest"></div></div>
+<div id="pauseScreen" class="overlay hidden"><div class="emblem">⏸️</div><h1>PAUSED</h1><p class="desc">Ready to keep climbing?</p><button class="cta" id="resume">▶ RESUME</button></div>
+</div>
+<script src="https://www.youtube.com/game_api/v1"></script>
+<script>
+(()=>{'use strict';
+const c=document.getElementById('game'),ctx=c.getContext('2d'),W=420,H=700;
+const $=id=>document.getElementById(id);
+let mode='start',last=0,elapsed=0,distance=0,coins=0,best=0,obstacles=[],tokens=[],particles=[],stars=[],spawnO=0,spawnC=0,combo=0,toastTimer=0,shake=0,moveTarget=null;
+const inYouTube = typeof ytgame !== 'undefined' && ytgame.IN_PLAYABLES_ENV;
+let sdkPaused=false, animationId=null, saveLoaded=false, saveQueue=Promise.resolve();
+const saveBest=()=>{if(inYouTube && saveLoaded){saveQueue=saveQueue.catch(()=>{}).then(()=>ytgame.game.saveData(JSON.stringify({version:1,best}))).catch(console.warn)}};
+const sendBest=()=>{if(inYouTube)ytgame.engagement.sendScore({value:best}).catch(console.warn)};
+if(!inYouTube){try{best=Number(localStorage.getItem('coinClimberBest'))||0}catch(e){}}
+$('best').textContent=best;
+const p={x:210,y:545,r:18,vx:0};const keys={};
+const rand=(a,b)=>a+Math.random()*(b-a),clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+for(let i=0;i<65;i++)stars.push({x:rand(0,W),y:rand(0,H),r:rand(.5,2),speed:rand(.3,1.3),alpha:rand(.15,.65)});
+function reset(){elapsed=0;distance=0;coins=0;combo=0;obstacles=[];tokens=[];particles=[];spawnO=.6;spawnC=.22;shake=0;moveTarget=null;p.x=210;p.vx=0;updateHud()}
+function updateHud(){$('coins').textContent='🪙 '+coins;$('distance').textContent=Math.floor(distance)+' m';$('best').textContent=best}
+function show(id){for(const item of ['startScreen','overScreen','pauseScreen'])$(item).classList.toggle('hidden',item!==id);$('pause').classList.toggle('show',mode==='play')}
+function start(){if(sdkPaused)return;reset();mode='play';show('');last=performance.now()}
+function pause(){if(sdkPaused)return;if(mode==='play'){mode='pause';show('pauseScreen')}else if(mode==='pause'){mode='play';show('');last=performance.now()}}
+function end(){mode='over';const score=coins*10+Math.floor(distance);if(score>best){best=score;if(inYouTube){saveBest();sendBest()}else{try{localStorage.setItem('coinClimberBest',String(best))}catch(e){}}}$('endCoins').textContent=coins;$('endMeters').textContent=Math.floor(distance);$('endBest').textContent='Score: '+score+' • Best: '+best;$('endText').textContent=score===best?'🏆 New or tied high score!':'Great run! Keep going for a new record.';show('overScreen');updateHud()}
+$('start').onclick=start;$('again').onclick=start;$('pause').onclick=pause;$('resume').onclick=pause;
+window.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' ','a','A','d','D','p','P'].includes(e.key))e.preventDefault();keys[e.key.toLowerCase()]=true;if(e.key===' '){if(mode==='start'||mode==='over')start();else pause()}if(e.key.toLowerCase()==='p')pause()});window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+function pointerX(e){const r=c.getBoundingClientRect();return clamp((e.clientX-r.left)/r.width*W,35,W-35)}
+c.addEventListener('pointerdown',e=>{if(mode!=='play')return;moveTarget=pointerX(e);try{c.setPointerCapture(e.pointerId)}catch(err){}});c.addEventListener('pointermove',e=>{if(mode==='play'&&(e.buttons||e.pointerType==='touch'))moveTarget=pointerX(e)});c.addEventListener('pointerup',()=>moveTarget=null);c.addEventListener('pointercancel',()=>moveTarget=null);
+function burst(x,y,color,n=10){for(let i=0;i<n;i++){const a=rand(0,Math.PI*2),s=rand(50,190);particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rand(.3,.65),max:.65,r:rand(2,5),color})}}
+function notice(msg){$('toast').textContent=msg;$('toast').style.opacity='1';toastTimer=.8}
+function update(dt){elapsed+=dt;const difficulty=Math.min(2.45,1+distance/900),speed=205*difficulty;distance+=speed*dt*.085;
+let direction=(keys['arrowleft']||keys['a']?-1:0)+(keys['arrowright']||keys['d']?1:0);if(moveTarget!==null){p.vx+=(clamp((moveTarget-p.x)*12,-580,580)-p.vx)*Math.min(1,dt*11)}else p.vx+=(direction*370-p.vx)*Math.min(1,dt*10);p.x=clamp(p.x+p.vx*dt,29,W-29);
+spawnC-=dt;spawnO-=dt;
+if(spawnC<=0){const x=rand(42,W-42);const count=Math.random()<.34?3:1;for(let j=0;j<count;j++)tokens.push({x:clamp(x+Math.sin(j)*19,35,W-35),y:-30-j*48,r:12,phase:rand(0,6.3)});spawnC=rand(.47,.85)/Math.sqrt(difficulty)}
+if(spawnO<=0){const x=rand(37,W-37),wide=Math.random()<.17;obstacles.push({x,y:-32,w:wide?90:rand(42,68),h:wide?24:rand(32,47),rot:rand(-.16,.16)});spawnO=rand(.75,1.35)/Math.sqrt(difficulty)}
+for(const st of stars){st.y+=speed*dt*st.speed;if(st.y>H){st.y=-5;st.x=rand(0,W)}}
+for(const ob of obstacles){ob.y+=speed*dt;if(Math.abs(ob.x-p.x)<ob.w/2+p.r*.72&&Math.abs(ob.y-p.y)<ob.h/2+p.r*.78){shake=16;burst(p.x,p.y,'#ff6b70',34);end();return}}
+for(const t of tokens){t.y+=speed*dt;t.phase+=dt*8;if(Math.hypot(t.x-p.x,t.y-p.y)<t.r+p.r*.8){t.gone=true;coins++;combo++;burst(t.x,t.y,'#ffdc58',12);if(combo%10===0)notice('✨ '+combo+' COINS!');updateHud()}}
+obstacles=obstacles.filter(o=>o.y<H+60);tokens=tokens.filter(t=>!t.gone&&t.y<H+40);
+for(const a of particles){a.x+=a.vx*dt;a.y+=a.vy*dt;a.vy+=100*dt;a.life-=dt}particles=particles.filter(a=>a.life>0);
+if(toastTimer>0){toastTimer-=dt;if(toastTimer<=0)$('toast').style.opacity='0'};updateHud()}
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+function render(){ctx.save();ctx.clearRect(0,0,W,H);let bg=ctx.createLinearGradient(0,0,W,H);bg.addColorStop(0,'#0c1840');bg.addColorStop(.5,'#131b4d');bg.addColorStop(1,'#080f2e');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+const offset=(distance*11)%72;
+ctx.strokeStyle='#82b5ff16';ctx.lineWidth=1;for(let x=24;x<W;x+=48){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}for(let y=offset-72;y<H;y+=72){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+for(const s of stars){ctx.globalAlpha=s.alpha;ctx.fillStyle='#b6edff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()}ctx.globalAlpha=1;
+ctx.fillStyle='#76c7ff12';ctx.fillRect(11,0,5,H);ctx.fillRect(W-16,0,5,H);ctx.fillStyle='#76c7ff66';for(let y=offset-65;y<H;y+=72){roundRect(10,y,7,35,3);ctx.fill();roundRect(W-17,y,7,35,3);ctx.fill()}
+for(const t of tokens){ctx.save();ctx.translate(t.x,t.y);const squish=.72+Math.abs(Math.cos(t.phase))*.28;ctx.scale(squish,1);ctx.shadowColor='#ffc83c';ctx.shadowBlur=17;ctx.fillStyle='#ffb834';ctx.beginPath();ctx.arc(0,0,13,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.lineWidth=3;ctx.strokeStyle='#ffec80';ctx.stroke();ctx.fillStyle='#d77c20';ctx.font='bold 16px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('$',0,1);ctx.restore()}
+for(const ob of obstacles){ctx.save();ctx.translate(ob.x,ob.y);ctx.rotate(ob.rot);ctx.shadowColor='#ff2449';ctx.shadowBlur=14;ctx.fillStyle='#dd3157';roundRect(-ob.w/2,-ob.h/2,ob.w,ob.h,9);ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle='#ff8e95';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='#ffcad0';ctx.font='bold 23px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('✕',0,1);ctx.restore()}
+// Player rocket
+ctx.save();ctx.translate(p.x,p.y);const tilt=clamp(p.vx/600,-.35,.35);ctx.rotate(tilt);
+if(mode==='play'){ctx.fillStyle='#ffb94a';ctx.beginPath();ctx.moveTo(-10,17);ctx.lineTo(0,39+Math.sin(elapsed*40)*8);ctx.lineTo(10,17);ctx.fill();ctx.fillStyle='#fff1a4';ctx.beginPath();ctx.moveTo(-5,18);ctx.lineTo(0,30+Math.sin(elapsed*34)*4);ctx.lineTo(5,18);ctx.fill()}
+ctx.shadowColor='#3be4ff';ctx.shadowBlur=20;ctx.fillStyle='#4acbff';ctx.beginPath();ctx.moveTo(0,-27);ctx.quadraticCurveTo(21,-9,15,22);ctx.lineTo(-15,22);ctx.quadraticCurveTo(-21,-9,0,-27);ctx.closePath();ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#1854a9';ctx.beginPath();ctx.arc(0,-3,10,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#c9f6ff';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='#9ee9ff';ctx.beginPath();ctx.arc(-3,-6,3,0,Math.PI*2);ctx.fill();ctx.fillStyle='#f8a14c';ctx.beginPath();ctx.moveTo(-15,11);ctx.lineTo(-24,24);ctx.lineTo(-11,21);ctx.fill();ctx.beginPath();ctx.moveTo(15,11);ctx.lineTo(24,24);ctx.lineTo(11,21);ctx.fill();ctx.restore();
+for(const a of particles){ctx.globalAlpha=Math.max(0,a.life/a.max);ctx.fillStyle=a.color;ctx.beginPath();ctx.arc(a.x,a.y,a.r,0,Math.PI*2);ctx.fill()}ctx.globalAlpha=1;
+const fade=ctx.createLinearGradient(0,0,0,115);fade.addColorStop(0,'#07142cc5');fade.addColorStop(1,'#07142c00');ctx.fillStyle=fade;ctx.fillRect(0,0,W,115);ctx.restore()}
+function frame(now){if(sdkPaused){animationId=null;return}const dt=Math.min(.032,Math.max(0,(now-last)/1000||0));last=now;if(mode==='play')update(dt);render();animationId=requestAnimationFrame(frame)}
+// Render the fully interactable menu before notifying YouTube.
+render();
+if(inYouTube){
+  ytgame.system.isAudioEnabled(); // Current version intentionally produces no audio.
+  ytgame.system.onAudioEnabledChange(()=>{});
+  ytgame.system.onPause(()=>{
+    sdkPaused=true;
+    if(animationId!==null){cancelAnimationFrame(animationId);animationId=null}
+    if(mode==='play'){mode='pause';show('pauseScreen')}
+    saveBest();
+  });
+  ytgame.system.onResume(()=>{
+    sdkPaused=false;last=performance.now();
+    if(animationId===null)animationId=requestAnimationFrame(frame);
+  });
+  ytgame.game.firstFrameReady();
+  ytgame.game.loadData().then(raw=>{
+    try{const data=JSON.parse(raw||'{}');if(Number.isSafeInteger(data.best)&&data.best>=0)best=data.best}catch(err){console.warn('Invalid saved score',err)}
+    saveLoaded=true;updateHud();ytgame.game.gameReady();
+  }).catch(err=>{
+    // A failed cloud load must not trigger an unsafe cloud write.
+    console.warn('Could not load cloud save',err);saveLoaded=false;ytgame.game.gameReady();
+  });
+}else{animationId=requestAnimationFrame(frame)}
+if(inYouTube)animationId=requestAnimationFrame(frame);
+})();
+</script></body></html>
